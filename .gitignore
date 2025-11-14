@@ -15,3 +15,7 @@ __pycache__/
 # Operating System files
 .DS_Store
 Thumbs.db
+# Firebase secrets (NEVER COMMIT)
+.streamlit/secrets.toml
+key.json
+*.json
