@@ -1,0 +1,23 @@
+# Core Streamlit App and Data Handling
+streamlit
+pandas
+plotly
+pyvis
+streamlit-aggrid
+
+# Data Acquisition
+praw
+asyncpraw
+feedparser
+httpx
+
+# AI and Data Analysis (for Hugging Face)
+transformers
+torch
+trafilatura
+
+# Database
+firebase-admin
+
+# Advanced/Utility
+pydantic

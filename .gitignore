@@ -1,0 +1,17 @@
+# Python Virtual Environment
+venv/
+
+# Python compiled files
+__pycache__/
+*.pyc
+*.pyd
+
+# Firebase Service Account JSON file (Contains private keys!)
+*.json
+
+# Poetry/packaging configuration files (usually auto-generated)
+*.toml
+
+# Operating System files
+.DS_Store
+Thumbs.db
