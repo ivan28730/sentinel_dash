@@ -12,3 +12,4 @@ firebase-admin
 
 # Utility
 pydantic
+plotly
