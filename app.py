@@ -22,6 +22,9 @@ st.markdown("""
     .stProgress > div > div > div > div {background: linear-gradient(to right, #667eea, #764ba2);}
     h1 {color: #00D9FF !important;}
     .metric-card {padding: 20px; border-radius: 10px; text-align: center;}
+    .chart-card {padding: 20px; border-radius: 14px; background: rgba(255,255,255,0.04); box-shadow: 0 20px 40px rgba(0,0,0,0.25);}
+    .chart-section h3 {margin-bottom: 0.15rem;}
+    .chart-section .caption {color: #9da6c1; margin-top: 0;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -195,7 +198,17 @@ def build_geo_heatmap_data(_db_client):
         iso = _country_to_iso(country)
         if iso:
             rows.append({"country": country, "iso_alpha": iso, "count": total})
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df['rank'] = df['count'].rank(method='dense', ascending=False).astype(int)
+        df['share'] = df['count'] / df['count'].sum()
+    return df
+
+
+def summarize_top_countries(geo_df: pd.DataFrame, top_n: int = 6) -> pd.DataFrame:
+    if geo_df.empty:
+        return geo_df
+    return geo_df.sort_values('count', ascending=False).head(top_n)
 
 
 @st.cache_data(ttl=900)
@@ -383,34 +396,61 @@ def show_main_dashboard(db_client):
     st.markdown("---")
     st.subheader("🗺️ Geographic Heat Map")
     geo_df = build_geo_heatmap_data(db_client)
-    if not geo_df.empty:
-        heatmap_fig = px.choropleth(
-            geo_df,
-            locations="iso_alpha",
-            color="count",
-            hover_name="country",
-            color_continuous_scale=["#1b4332", "#2d6a4f", "#95d5b2", "#d8f3dc"],
-            labels={"count": "Mentions"}
-        )
-        heatmap_fig.update_layout(
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            height=500,
-            margin=dict(l=0, r=0, t=0, b=0),
-            geo=dict(showframe=False, projection_type='natural earth')
-        )
-        st.plotly_chart(heatmap_fig, use_container_width=True)
-        st.caption("Counts are derived from the latest articles mentioning a country in the title or matched keywords.")
-    else:
-        st.info("ℹ️ Not enough geographic signals yet. Add more keywords or run the scraper again.")
+    with st.container():
+        if not geo_df.empty:
+            heatmap_fig = px.choropleth(
+                geo_df,
+                locations="iso_alpha",
+                color="count",
+                hover_name="country",
+                color_continuous_scale=["#14363c", "#1a6d7b", "#379683", "#8ce0d6"],
+                labels={"count": "Mentions"}
+            )
+            heatmap_fig.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                height=520,
+                margin=dict(l=10, r=10, t=20, b=10),
+                geo=dict(showframe=False, projection_type='natural earth')
+            )
+            heatmap_fig.update_traces(marker_line_width=0.3, marker_line_color='white')
+            col_map, col_table = st.columns([3, 1], gap="medium")
+            with col_map:
+                st.markdown("<div class='chart-card chart-section'>", unsafe_allow_html=True)
+                st.plotly_chart(heatmap_fig, use_container_width=True, theme="streamlit", sharing="streamlit")
+                st.markdown("</div>", unsafe_allow_html=True)
+            top_countries = summarize_top_countries(geo_df)
+            with col_table:
+                st.markdown("<div class='chart-card'>", unsafe_allow_html=True)
+                st.markdown("**Top Countries**")
+                for _, row in top_countries.iterrows():
+                    st.markdown(f"- {row['country']} ({int(row['count'])} mentions, {row['share']*100:.1f}% of map)")
+                st.caption("Mentions derived from titles/keywords; share helps spot clusters over time.")
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.info("ℹ️ Not enough geographic signals yet. Add more keywords or run the scraper again.")
 
     st.markdown("---")
     st.subheader("🔗 Topic Network Graph")
     nodes, edges = build_topic_network_data(db_client)
     network_fig = render_topic_network(nodes, edges)
     if network_fig:
-        st.plotly_chart(network_fig, use_container_width=True)
-        st.caption("Nodes scale with keyword mentions; links show how often keywords co-occur in the same article.")
+        col_graph, col_insights = st.columns([3, 1], gap="medium")
+        with col_graph:
+            st.markdown("<div class='chart-card chart-section'>", unsafe_allow_html=True)
+            st.plotly_chart(network_fig, use_container_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+        with col_insights:
+            st.markdown("<div class='chart-card'>", unsafe_allow_html=True)
+            st.markdown("**Top Co-occurrences**")
+            top_edges = sorted(edges, key=lambda edge: edge['weight'], reverse=True)[:5]
+            if top_edges:
+                for edge in top_edges:
+                    st.markdown(f"- {edge['source']} ↔ {edge['target']} ({edge['weight']} articles)")
+            else:
+                st.write("Awaiting richer keyword overlaps...")
+            st.markdown("</div>", unsafe_allow_html=True)
+        st.caption("Nodes scale with keyword mentions; thicker links show recurring keyword pairings.")
     else:
         st.info("ℹ️ Need more overlapping keywords before we can build a network graph.")
 
