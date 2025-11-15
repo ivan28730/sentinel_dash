@@ -6,7 +6,7 @@ import firebase_admin
 from google.oauth2 import service_account
 import requests
 import time
-from datetime import datetime
+from datetime import datetime, date, timedelta
 import plotly.express as px
 import plotly.graph_objects as go
 import networkx as nx
@@ -120,6 +120,19 @@ st.markdown("""
         background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.94));
         border: 1px solid rgba(148, 163, 184, 0.35);
         box-shadow: 0 18px 45px rgba(15, 23, 42, 0.85);
+    }
+    .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 4px 11px;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid rgba(148, 163, 184, 0.6);
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        color: #e5e7eb;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -240,7 +253,7 @@ def fetch_scraper_config(_db_client):
     if _db_client:
         try:
             doc = _db_client.collection('config').document('scraper_settings').get()
-            return doc.to_dict() if doc.exists else {"keywords": [], "rss_feeds": [], "subreddits": []}
+            return doc.to_dict() if doc.exists else {"keywords": [], "rss_feeds": [], "subreddits": [], "date_from": None, "date_to": None, "max_results_per_keyword": 30}
         except:
             return None
     return None
@@ -432,7 +445,19 @@ def render_ai_briefs(db_client):
 def show_main_dashboard(db_client):
     st.markdown("<h1 style='text-align: center;'>🛡️ SENTINEL INTELLIGENCE DASHBOARD</h1>", unsafe_allow_html=True)
     st.markdown("<p class='headline-subtitle' style='text-align: center;'>REAL-TIME GEOPOLITICAL SIGNALS & RISK MONITORING</p>", unsafe_allow_html=True)
+    config = fetch_scraper_config(db_client) or {}
+    date_from = config.get("date_from")
+    date_to = config.get("date_to")
+    window_label = "Full history"
+    if date_from and date_to:
+        try:
+            start_display = datetime.fromisoformat(date_from).strftime("%d %b %Y")
+            end_display = datetime.fromisoformat(date_to).strftime("%d %b %Y")
+            window_label = f"{start_display} – {end_display}"
+        except Exception:
+            pass
     st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='text-align:center; margin-bottom: 0.4rem;'><span class='pill'>ANALYSIS WINDOW {window_label}</span></div>", unsafe_allow_html=True)
     
     metrics = fetch_dashboard_metrics(db_client)
     if not metrics:
@@ -624,12 +649,42 @@ def show_settings_page(db_client):
         st.subheader("📡 RSS Feed URLs")
         feeds = st.text_area("One URL per line", value="\n".join(config.get('rss_feeds', [])), height=150,
                             help="Full RSS feed URLs to scrape")
+
+        st.subheader("📅 Analysis Window")
+        col_from, col_to = st.columns(2)
+        today = date.today()
+        default_from = today - timedelta(days=7)
+        cfg_from = config.get('date_from')
+        cfg_to = config.get('date_to')
+        try:
+            current_from = datetime.fromisoformat(cfg_from).date() if cfg_from else default_from
+        except Exception:
+            current_from = default_from
+        try:
+            current_to = datetime.fromisoformat(cfg_to).date() if cfg_to else today
+        except Exception:
+            current_to = today
+        start_date = col_from.date_input("From", value=current_from)
+        end_date = col_to.date_input("To", value=max(current_to, start_date))
+
+        st.subheader("📥 Volume Controls")
+        max_results_per_keyword = st.slider(
+            "Max articles per keyword per source",
+            min_value=10,
+            max_value=80,
+            value=int(config.get('max_results_per_keyword', 30)),
+            step=5,
+            help="Higher values mean richer context but longer and more expensive runs."
+        )
         
         if st.form_submit_button("💾 Save Configuration", type="primary", use_container_width=True):
             try:
                 db_client.collection('config').document('scraper_settings').set({
                     'keywords': [k.strip() for k in keywords.split('\n') if k.strip()],
                     'rss_feeds': [f.strip() for f in feeds.split('\n') if f.strip()],
+                    'date_from': start_date.isoformat(),
+                    'date_to': end_date.isoformat(),
+                    'max_results_per_keyword': int(max_results_per_keyword),
                     'last_updated': firestore.SERVER_TIMESTAMP
                 }, merge=True)
                 st.success("✅ Configuration saved successfully!")

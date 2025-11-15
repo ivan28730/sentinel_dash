@@ -10,6 +10,7 @@ import firebase_admin
 from collections import defaultdict
 import feedparser
 import textwrap
+from datetime import datetime, date
 
 # --- 1. FIREBASE INITIALIZATION & CONFIGURATION ---
 
@@ -41,7 +42,7 @@ def initialize_firebase():
         except Exception as e:
             print(f"🚨 FATAL ERROR initializing Firebase: {e}")
 
-def get_scraper_config() -> dict[str, list[str]]:
+def get_scraper_config() -> dict[str, Any]:
     """Reads configuration from Firestore or uses hardcoded values if uninitialized."""
     try:
         db = firestore.client()
@@ -55,7 +56,7 @@ def get_scraper_config() -> dict[str, list[str]]:
         print(f"⚠️ Could not load config from Firestore: {e}")
         
     # Fallback to default configuration with 100+ RSS feeds
-    default_config = {
+    default_config: dict[str, Any] = {
         "keywords": ["geopolitics", "trade war", "AI regulation", "international relations", "diplomacy"], 
         "rss_feeds": [
             # === INTERNATIONAL NEWS (Major Networks) ===
@@ -171,7 +172,10 @@ def get_scraper_config() -> dict[str, list[str]]:
             "https://qz.com/feed/",
             "https://www.huffpost.com/section/world-news/feed",
         ],
-        "subreddits": ["worldnews", "geopolitics"]
+        "subreddits": ["worldnews", "geopolitics"],
+        "date_from": None,
+        "date_to": None,
+        "max_results_per_keyword": 30,
     }
     print(f"ℹ️ Using default configuration with {len(default_config['rss_feeds'])} RSS feeds")
     return default_config
@@ -396,7 +400,7 @@ def generate_hash(url: str) -> str:
     """Generates a SHA-256 hash of the URL for unique identification."""
     return hashlib.sha256(url.encode('utf-8')).hexdigest()
 
-async def fetch_gnews_articles(keywords: list[str]) -> list[dict]:
+async def fetch_gnews_articles(keywords: list[str], date_from: Optional[date] = None, date_to: Optional[date] = None, max_per_keyword: int = 30) -> list[dict]:
     """Asynchronously fetches articles for configured keywords using the GNews API."""
     gnews_api_key = os.environ.get("GNEWS_API_KEY", "YOUR_PLACEHOLDER_KEY")
     
@@ -410,7 +414,11 @@ async def fetch_gnews_articles(keywords: list[str]) -> list[dict]:
     async with httpx.AsyncClient(timeout=20.0) as client:
         tasks = []
         for keyword in keywords:
-            params = {"q": keyword, "apikey": gnews_api_key, "lang": "en", "max": 10}
+            params: dict[str, Any] = {"q": keyword, "apikey": gnews_api_key, "lang": "en", "max": max_per_keyword}
+            if date_from:
+                params["from"] = date_from.isoformat()
+            if date_to:
+                params["to"] = date_to.isoformat()
             tasks.append(client.get(base_url, params=params))
         
         responses = await asyncio.gather(*tasks, return_exceptions=True)
@@ -436,7 +444,7 @@ async def fetch_gnews_articles(keywords: list[str]) -> list[dict]:
     return all_articles
 
 
-async def fetch_newsapi_articles(keywords: list[str]) -> list[dict]:
+async def fetch_newsapi_articles(keywords: list[str], date_from: Optional[date] = None, date_to: Optional[date] = None, max_per_keyword: int = 30) -> list[dict]:
     """Asynchronously fetches articles for configured keywords using NewsAPI."""
     newsapi_key = os.environ.get("NEWSAPI_KEY", "")
     
@@ -450,13 +458,17 @@ async def fetch_newsapi_articles(keywords: list[str]) -> list[dict]:
     async with httpx.AsyncClient(timeout=20.0) as client:
         tasks = []
         for keyword in keywords:
-            params = {
+            params: dict[str, Any] = {
                 "q": keyword,
                 "apiKey": newsapi_key,
                 "language": "en",
                 "sortBy": "publishedAt",
-                "pageSize": 10
+                "pageSize": max_per_keyword
             }
+            if date_from:
+                params["from"] = datetime.combine(date_from, datetime.min.time()).isoformat() + "Z"
+            if date_to:
+                params["to"] = datetime.combine(date_to, datetime.max.time()).isoformat() + "Z"
             tasks.append(client.get(base_url, params=params))
         
         responses = await asyncio.gather(*tasks, return_exceptions=True)
@@ -489,8 +501,8 @@ async def fetch_newsapi_articles(keywords: list[str]) -> list[dict]:
     return all_articles
 
 
-async def fetch_rss_articles(rss_feeds: list[str]) -> list[dict]:
-    """Asynchronously fetches articles from RSS feeds."""
+async def fetch_rss_articles(rss_feeds: list[str], date_from: Optional[date] = None, date_to: Optional[date] = None) -> list[dict]:
+    """Asynchronously fetches articles from RSS feeds. Date filters are applied client-side."""
     all_articles = []
     
     print(f"📡 Starting RSS fetch from {len(rss_feeds)} feeds...")
@@ -518,16 +530,29 @@ async def fetch_rss_articles(rss_feeds: list[str]) -> list[dict]:
                         
                         # Extract articles from feed entries
                         for entry in feed.entries:
-                            # Get the link (URL)
                             url = entry.get('link', '')
                             if not url:
                                 continue
-                            
+
+                            published_raw = entry.get('published', entry.get('updated', ''))
+                            include_entry = True
+                            if (date_from or date_to) and hasattr(entry, 'published_parsed') and entry.published_parsed:
+                                try:
+                                    entry_dt = datetime(*entry.published_parsed[:6]).date()
+                                    if date_from and entry_dt < date_from:
+                                        include_entry = False
+                                    if date_to and entry_dt > date_to:
+                                        include_entry = False
+                                except Exception:
+                                    include_entry = True
+                            if not include_entry:
+                                continue
+
                             article = {
                                 'url': url,
                                 'title': entry.get('title', 'No Title'),
                                 'description': entry.get('summary', entry.get('description', '')),
-                                'publishedAt': entry.get('published', entry.get('updated', '')),
+                                'publishedAt': published_raw,
                                 'source_type': 'RSS',
                                 'url_hash': generate_hash(url)
                             }
@@ -602,6 +627,19 @@ async def main_pipeline():
     config = get_scraper_config()
     keywords = config.get('keywords', [])
     rss_feeds = config.get('rss_feeds', [])
+    date_from_raw = config.get('date_from')
+    date_to_raw = config.get('date_to')
+    max_results_per_keyword = int(config.get('max_results_per_keyword', 30))
+
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
+    try:
+        if isinstance(date_from_raw, str) and date_from_raw:
+            date_from = datetime.fromisoformat(date_from_raw).date()
+        if isinstance(date_to_raw, str) and date_to_raw:
+            date_to = datetime.fromisoformat(date_to_raw).date()
+    except Exception as e:
+        print(f"⚠️ Could not parse date range from config: {e}")
     
     # 2. Deduplication Preparation 
     existing_hashes = get_existing_hashes() 
@@ -609,9 +647,9 @@ async def main_pipeline():
     # 3. Fetch data concurrently
     print("\n📡 Fetching articles from sources...")
     fetch_tasks = [
-        fetch_gnews_articles(keywords),
-        fetch_newsapi_articles(keywords),
-        fetch_rss_articles(rss_feeds),
+        fetch_gnews_articles(keywords, date_from=date_from, date_to=date_to, max_per_keyword=max_results_per_keyword),
+        fetch_newsapi_articles(keywords, date_from=date_from, date_to=date_to, max_per_keyword=max_results_per_keyword),
+        fetch_rss_articles(rss_feeds, date_from=date_from, date_to=date_to),
     ]
     gnews_data, newsapi_data, rss_data = await asyncio.gather(*fetch_tasks)
     all_raw_articles = gnews_data + newsapi_data + rss_data
