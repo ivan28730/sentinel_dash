@@ -64,6 +64,10 @@ def get_scraper_config() -> dict[str, list[str]]:
     print(f"ℹ️ Using default configuration")
     return default_config
 
+# API Keys
+GNEWS_API_KEY = os.getenv("GNEWS_API_KEY", "")
+NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
+
 def get_existing_hashes() -> set[str]:
     """Retrieves all existing url_hash values from the articles collection for deduplication."""
     try:
@@ -198,11 +202,64 @@ async def fetch_gnews_articles(keywords: list[str]) -> list[dict]:
                         article['source_type'] = 'GNEWS'
                         article['url_hash'] = generate_hash(article['url'])
                     all_articles.extend(articles)
-                    print(f"✅ Fetched {len(articles)} articles for keyword: {keywords[i]}")
+                    print(f"✅ GNews: Fetched {len(articles)} articles for '{keywords[i]}'")
                 except Exception as e:
                     print(f"❌ Failed to parse GNews response: {e}")
             else:
                 print(f"❌ GNews API returned status {response.status_code}")
+                
+    return all_articles
+
+
+async def fetch_newsapi_articles(keywords: list[str]) -> list[dict]:
+    """Asynchronously fetches articles for configured keywords using NewsAPI."""
+    newsapi_key = os.environ.get("NEWSAPI_KEY", "")
+    
+    if not newsapi_key:
+        print("⚠️ WARNING: NEWSAPI_KEY not set. Skipping NewsAPI scraping.")
+        return []
+    
+    base_url = "https://newsapi.org/v2/everything"
+    all_articles = []
+    
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        tasks = []
+        for keyword in keywords:
+            params = {
+                "q": keyword,
+                "apiKey": newsapi_key,
+                "language": "en",
+                "sortBy": "publishedAt",
+                "pageSize": 10
+            }
+            tasks.append(client.get(base_url, params=params))
+        
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for i, response in enumerate(responses):
+            if isinstance(response, Exception):
+                print(f"❌ NewsAPI error for '{keywords[i]}': {response}")
+                continue
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    articles = data.get('articles', [])
+                    for article in articles:
+                        # Convert NewsAPI format to match our structure
+                        formatted_article = {
+                            'url': article['url'],
+                            'title': article['title'],
+                            'description': article.get('description', ''),
+                            'publishedAt': article.get('publishedAt', ''),
+                            'source_type': 'NEWSAPI',
+                            'url_hash': generate_hash(article['url'])
+                        }
+                        all_articles.append(formatted_article)
+                    print(f"✅ NewsAPI: Fetched {len(articles)} articles for '{keywords[i]}'")
+                except Exception as e:
+                    print(f"❌ Failed to parse NewsAPI response: {e}")
+            else:
+                print(f"❌ NewsAPI returned status {response.status_code}")
                 
     return all_articles
 
@@ -266,10 +323,11 @@ async def main_pipeline():
     print("\n📡 Fetching articles from sources...")
     fetch_tasks = [
         fetch_gnews_articles(keywords),
+        fetch_newsapi_articles(keywords),
         fetch_rss_articles(rss_feeds),
     ]
-    gnews_data, rss_data = await asyncio.gather(*fetch_tasks)
-    all_raw_articles = gnews_data + rss_data
+    gnews_data, newsapi_data, rss_data = await asyncio.gather(*fetch_tasks)
+    all_raw_articles = gnews_data + newsapi_data + rss_data
     print(f"\n📊 Total raw articles fetched: {len(all_raw_articles)}")
 
     # 4. Deduplication and Filter
