@@ -19,12 +19,108 @@ st.set_page_config(layout="wide", page_title="Sentinel Dashboard", page_icon="�
 
 st.markdown("""
 <style>
-    .stProgress > div > div > div > div {background: linear-gradient(to right, #667eea, #764ba2);}
-    h1 {color: #00D9FF !important;}
-    .metric-card {padding: 20px; border-radius: 10px; text-align: center;}
-    .chart-card {padding: 20px; border-radius: 14px; background: rgba(255,255,255,0.04); box-shadow: 0 20px 40px rgba(0,0,0,0.25);}
-    .chart-section h3 {margin-bottom: 0.15rem;}
-    .chart-section .caption {color: #9da6c1; margin-top: 0;}
+    .stApp {
+        background: radial-gradient(circle at top, #0b1220 0, #020617 50%, #020617 100%);
+        color: #e5e7eb;
+    }
+    .block-container {
+        padding-top: 1.75rem;
+        padding-bottom: 2.5rem;
+        max-width: 1180px;
+    }
+    h1, h2, h3, h4 {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+        letter-spacing: 0.03em;
+    }
+    h1 {
+        color: #22d3ee !important;
+        font-weight: 800;
+        text-transform: uppercase;
+    }
+    .headline-subtitle {
+        color: #9ca3af;
+        font-size: 0.95rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        margin-top: -0.45rem;
+        margin-bottom: 1.2rem;
+    }
+    .divider {
+        border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+        margin: 0.75rem 0 1.25rem 0;
+    }
+    .metric-card {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 18px 20px;
+        border-radius: 18px;
+        background: radial-gradient(circle at top left, rgba(248, 250, 252, 0.12), transparent 55%),
+                    linear-gradient(135deg, rgba(148, 163, 184, 0.12), rgba(15, 23, 42, 0.96));
+        box-shadow: 0 22px 55px rgba(15, 23, 42, 0.85);
+        border: 1px solid rgba(148, 163, 184, 0.45);
+        backdrop-filter: blur(18px);
+        transition: transform 150ms ease-out, box-shadow 150ms ease-out, border-color 150ms ease-out;
+    }
+    .metric-card:hover {
+        transform: translateY(-3px) scale(1.01);
+        box-shadow: 0 30px 70px rgba(15, 23, 42, 0.95);
+        border-color: rgba(94, 234, 212, 0.75);
+    }
+    .metric-card.articles {background-image: linear-gradient(135deg, #e0f4ff, #c4b5fd);}    
+    .metric-card.mentions {background-image: linear-gradient(135deg, #fee2f2, #fecaca);}    
+    .metric-card.topics {background-image: linear-gradient(135deg, #e0f2fe, #a5b4fc);}      
+    .metric-card.live {background-image: linear-gradient(135deg, #dcfce7, #a7f3d0);}        
+    .metric-icon {
+        font-size: 1.6rem;
+        filter: drop-shadow(0 10px 20px rgba(15, 23, 42, 0.55));
+    }
+    .metric-content {text-align: right;}
+    .metric-label {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        color: #111827;
+        opacity: 0.8;
+    }
+    .metric-value {
+        font-size: 1.8rem;
+        font-weight: 800;
+        color: #020617;
+    }
+    .chart-card {
+        padding: 18px 18px;
+        border-radius: 18px;
+        background: radial-gradient(circle at top, rgba(248, 250, 252, 0.06), transparent 60%),
+                    linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.96));
+        box-shadow: 0 26px 60px rgba(15, 23, 42, 0.95);
+        border: 1px solid rgba(148, 163, 184, 0.45);
+        backdrop-filter: blur(18px);
+    }
+    .chart-section h3 {
+        margin-bottom: 0.25rem;
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        color: #9ca3af;
+    }
+    .chart-section .caption {
+        color: #9da6c1;
+        margin-top: 0.1rem;
+        font-size: 0.8rem;
+    }
+    .insight-card h3 {
+        font-size: 0.95rem;
+        margin-bottom: 0.25rem;
+    }
+    .insight-card {
+        padding: 14px 16px;
+        border-radius: 16px;
+        background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.94));
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        box-shadow: 0 18px 45px rgba(15, 23, 42, 0.85);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -270,10 +366,11 @@ def render_topic_network(nodes, edges):
         hoverinfo='text',
         marker=dict(
             showscale=True,
-            colorscale='Magma',
+            colorscale=[[0, '#bfdbfe'], [0.5, '#a5b4fc'], [1, '#f9a8d4']],
             reversescale=False,
             color=sizes,
             size=sizes,
+            line=dict(width=1, color='rgba(15,23,42,0.9)'),
             colorbar=dict(title='Mentions')
         )
     )
@@ -310,6 +407,7 @@ def render_ai_briefs(db_client):
                 continue
             article = articles[target_index]
             with col:
+                st.markdown("<div class='insight-card'>", unsafe_allow_html=True)
                 st.markdown(f"### [{article.get('title', 'Untitled')}]({article.get('url', '#')})")
                 st.markdown(_sentiment_badge(article.get('sentiment')), unsafe_allow_html=True)
                 summary = article.get('summary') or article.get('description') or "Summary unavailable."
@@ -328,12 +426,13 @@ def render_ai_briefs(db_client):
                     st.markdown("**Key Points**")
                     for point in key_points[:3]:
                         st.markdown(f"- {point}")
+                st.markdown("</div>", unsafe_allow_html=True)
 
 
 def show_main_dashboard(db_client):
     st.markdown("<h1 style='text-align: center;'>🛡️ SENTINEL INTELLIGENCE DASHBOARD</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #888; font-size: 1.2em;'>Real-time Geopolitical Trend Analysis</p>", unsafe_allow_html=True)
-    st.markdown("---")
+    st.markdown("<p class='headline-subtitle' style='text-align: center;'>REAL-TIME GEOPOLITICAL SIGNALS & RISK MONITORING</p>", unsafe_allow_html=True)
+    st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
     
     metrics = fetch_dashboard_metrics(db_client)
     if not metrics:
@@ -347,13 +446,57 @@ def show_main_dashboard(db_client):
     topics = len(counts)
     
     with col1:
-        st.markdown(f"<div class='metric-card' style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);'><h1 style='color: white; margin: 0;'>📰 {total}</h1><p style='color: #E0E0E0;'>Articles</p></div>", unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class='metric-card articles'>
+                <div class='metric-icon'>📰</div>
+                <div class='metric-content'>
+                    <div class='metric-label'>Articles</div>
+                    <div class='metric-value'>{total}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     with col2:
-        st.markdown(f"<div class='metric-card' style='background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);'><h1 style='color: white; margin: 0;'>🔥 {mentions}</h1><p style='color: #E0E0E0;'>Mentions</p></div>", unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class='metric-card mentions'>
+                <div class='metric-icon'>🔥</div>
+                <div class='metric-content'>
+                    <div class='metric-label'>Mentions</div>
+                    <div class='metric-value'>{mentions}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     with col3:
-        st.markdown(f"<div class='metric-card' style='background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);'><h1 style='color: white; margin: 0;'>🌍 {topics}</h1><p style='color: #E0E0E0;'>Topics</p></div>", unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class='metric-card topics'>
+                <div class='metric-icon'>🌍</div>
+                <div class='metric-content'>
+                    <div class='metric-label'>Topics</div>
+                    <div class='metric-value'>{topics}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     with col4:
-        st.markdown(f"<div class='metric-card' style='background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);'><h1 style='color: white; margin: 0;'>✅</h1><p style='color: #E0E0E0;'>Live</p></div>", unsafe_allow_html=True)
+        st.markdown(
+            """
+            <div class='metric-card live'>
+                <div class='metric-icon'>✅</div>
+                <div class='metric-content'>
+                    <div class='metric-label'>Status</div>
+                    <div class='metric-value'>Live</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     
     st.markdown("<br>", unsafe_allow_html=True)
     
@@ -373,7 +516,7 @@ def show_main_dashboard(db_client):
         df = pd.DataFrame(counts.items(), columns=["Topic", "Count"]).sort_values("Count", ascending=False)
         
         fig = px.bar(df, x="Count", y="Topic", orientation='h', color="Count", 
-                     color_continuous_scale=["#667eea", "#764ba2", "#f093fb", "#f5576c"])
+                     color_continuous_scale=["#e0f2fe", "#c4b5fd", "#f9a8d4", "#fecaca"])
         fig.update_layout(height=max(400, len(df) * 40), showlegend=False, 
                          paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                          font=dict(color='white'))
@@ -403,7 +546,7 @@ def show_main_dashboard(db_client):
                 locations="iso_alpha",
                 color="count",
                 hover_name="country",
-                color_continuous_scale=["#14363c", "#1a6d7b", "#379683", "#8ce0d6"],
+                color_continuous_scale=["#f9f5ff", "#e0f2fe", "#bfdbfe", "#c4b5fd", "#f9a8d4"],
                 labels={"count": "Mentions"}
             )
             heatmap_fig.update_layout(
@@ -411,13 +554,21 @@ def show_main_dashboard(db_client):
                 plot_bgcolor='rgba(0,0,0,0)',
                 height=520,
                 margin=dict(l=10, r=10, t=20, b=10),
-                geo=dict(showframe=False, projection_type='natural earth')
+                geo=dict(
+                    showframe=False,
+                    projection_type='natural earth',
+                    bgcolor='rgba(0,0,0,0)',
+                    landcolor='#020617',
+                    oceancolor='#020617',
+                    lakecolor='#020617',
+                    coastlinecolor='#4b5563'
+                )
             )
-            heatmap_fig.update_traces(marker_line_width=0.3, marker_line_color='white')
+            heatmap_fig.update_traces(marker_line_width=0.4, marker_line_color='rgba(15,23,42,0.9)')
             col_map, col_table = st.columns([3, 1], gap="medium")
             with col_map:
                 st.markdown("<div class='chart-card chart-section'>", unsafe_allow_html=True)
-                st.plotly_chart(heatmap_fig, use_container_width=True, theme="streamlit", sharing="streamlit")
+                st.plotly_chart(heatmap_fig, use_container_width=True, config={"displayModeBar": False})
                 st.markdown("</div>", unsafe_allow_html=True)
             top_countries = summarize_top_countries(geo_df)
             with col_table:
@@ -438,7 +589,7 @@ def show_main_dashboard(db_client):
         col_graph, col_insights = st.columns([3, 1], gap="medium")
         with col_graph:
             st.markdown("<div class='chart-card chart-section'>", unsafe_allow_html=True)
-            st.plotly_chart(network_fig, use_container_width=True)
+            st.plotly_chart(network_fig, use_container_width=True, config={"displayModeBar": False})
             st.markdown("</div>", unsafe_allow_html=True)
         with col_insights:
             st.markdown("<div class='chart-card'>", unsafe_allow_html=True)
