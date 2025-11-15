@@ -1,0 +1,40 @@
+name: Run News Scraper
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # Every hour at :00
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Create Firebase credentials
+      run: |
+        echo '${{ secrets.FIREBASE_CREDENTIALS }}' > firebase-service-account.json
+    
+    - name: Run scraper
+      env:
+        FIREBASE_CREDENTIALS_PATH: firebase-service-account.json
+        GNEWS_API_KEY: ${{ secrets.GNEWS_API_KEY }}
+      run: |
+        python main_scraper.py
+    
+    - name: Cleanup
+      if: always()
+      run: |
+        rm -f firebase-service-account.json
