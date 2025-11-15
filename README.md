@@ -43,3 +43,15 @@ With the environment activated, install all required packages:
 
 ```bash
 pip install -r requirements.txt
+```
+
+### 3. Configure AI Analysis (Optional but recommended)
+
+Set the Hugging Face Inference credentials so the scraper can call the LLM for summaries and sentiment:
+
+```bash
+export HF_API_KEY="hf_your_key"
+# Optional overrides
+# export HF_MODEL_ID="mistralai/Mixtral-8x7B-Instruct"
+# export LLM_ANALYSIS_LIMIT=60  # Cap requests per run
+```

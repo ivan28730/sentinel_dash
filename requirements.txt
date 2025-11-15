@@ -13,3 +13,5 @@ firebase-admin
 # Utility
 pydantic
 plotly
+networkx
+pycountry

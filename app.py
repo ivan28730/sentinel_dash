@@ -9,6 +9,10 @@ import time
 from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
+import networkx as nx
+import pycountry
+from collections import Counter
+from typing import Optional
 
 
 st.set_page_config(layout="wide", page_title="Sentinel Dashboard", page_icon="🛡️", initial_sidebar_state="expanded")
@@ -20,6 +24,46 @@ st.markdown("""
     .metric-card {padding: 20px; border-radius: 10px; text-align: center;}
 </style>
 """, unsafe_allow_html=True)
+
+
+# Heuristic map keeps geoparsing lightweight without calling external APIs
+COUNTRY_SYNONYMS = {
+    "united states": "United States",
+    "usa": "United States",
+    "america": "United States",
+    "uk": "United Kingdom",
+    "united kingdom": "United Kingdom",
+    "great britain": "United Kingdom",
+    "england": "United Kingdom",
+    "china": "China",
+    "prc": "China",
+    "russia": "Russia",
+    "moscow": "Russia",
+    "ukraine": "Ukraine",
+    "india": "India",
+    "new delhi": "India",
+    "japan": "Japan",
+    "south korea": "Korea, Republic of",
+    "north korea": "Korea, Democratic People's Republic of",
+    "germany": "Germany",
+    "france": "France",
+    "canada": "Canada",
+    "brazil": "Brazil",
+    "mexico": "Mexico",
+    "saudi arabia": "Saudi Arabia",
+    "israel": "Israel",
+    "iran": "Iran, Islamic Republic of",
+    "turkey": "Turkey",
+    "australia": "Australia",
+    "south africa": "South Africa",
+    "nigeria": "Nigeria"
+}
+
+SENTIMENT_COLORS = {
+    "POSITIVE": "#2ecc71",
+    "NEGATIVE": "#e74c3c",
+    "NEUTRAL": "#bdc3c7"
+}
 
 
 @st.cache_resource
@@ -103,6 +147,176 @@ def fetch_scraper_config(_db_client):
     return None
 
 
+@st.cache_data(ttl=900)
+def fetch_recent_articles(_db_client, limit=400):
+    if _db_client:
+        try:
+            query = _db_client.collection('articles').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(limit)
+            return [doc.to_dict() for doc in query.stream()]
+        except Exception:
+            return []
+    return []
+
+
+def _detect_country_from_text(text: str) -> Optional[str]:
+    if not text:
+        return None
+    txt = text.lower()
+    for alias, canonical in COUNTRY_SYNONYMS.items():
+        if alias in txt:
+            return canonical
+    return None
+
+
+def _country_to_iso(country: str) -> Optional[str]:
+    if not country:
+        return None
+    try:
+        match = pycountry.countries.lookup(country)
+        return match.alpha_3
+    except LookupError:
+        return None
+
+
+@st.cache_data(ttl=900)
+def build_geo_heatmap_data(_db_client):
+    articles = fetch_recent_articles(_db_client)
+    if not articles:
+        return pd.DataFrame(columns=["country", "iso_alpha", "count"])
+    counts = Counter()
+    for article in articles:
+        location = article.get('focus_country') or article.get('location')
+        text = " ".join(filter(None, [article.get('title', ''), article.get('summary', ''), " ".join(article.get('keywords_matched', []))]))
+        country = location or _detect_country_from_text(text)
+        if country:
+            counts[country] += 1
+    rows = []
+    for country, total in counts.items():
+        iso = _country_to_iso(country)
+        if iso:
+            rows.append({"country": country, "iso_alpha": iso, "count": total})
+    return pd.DataFrame(rows)
+
+
+@st.cache_data(ttl=900)
+def build_topic_network_data(_db_client, max_nodes=25):
+    articles = fetch_recent_articles(_db_client)
+    if not articles:
+        return [], []
+    keyword_counts = Counter()
+    edge_counts = Counter()
+    for article in articles:
+        keywords = article.get('keywords_matched') or []
+        keywords = sorted(set(k.strip().title() for k in keywords if k))
+        for kw in keywords:
+            keyword_counts[kw] += 1
+        for i in range(len(keywords)):
+            for j in range(i + 1, len(keywords)):
+                edge_counts[(keywords[i], keywords[j])] += 1
+    top_keywords = set([kw for kw, _ in keyword_counts.most_common(max_nodes)])
+    nodes = [{"id": kw, "size": keyword_counts[kw]} for kw in top_keywords]
+    edges = []
+    for (src, dst), weight in edge_counts.items():
+        if src in top_keywords and dst in top_keywords and weight > 1:
+            edges.append({"source": src, "target": dst, "weight": weight})
+    return nodes, edges
+
+
+def render_topic_network(nodes, edges):
+    if not nodes:
+        return None
+    graph = nx.Graph()
+    for node in nodes:
+        graph.add_node(node['id'], size=node['size'])
+    for edge in edges:
+        graph.add_edge(edge['source'], edge['target'], weight=edge['weight'])
+    if graph.number_of_nodes() == 0:
+        return None
+    pos = nx.spring_layout(graph, seed=42, k=0.5)
+    edge_x, edge_y = [], []
+    for edge in graph.edges():
+        x0, y0 = pos[edge[0]]
+        x1, y1 = pos[edge[1]]
+        edge_x += [x0, x1, None]
+        edge_y += [y0, y1, None]
+    edge_trace = go.Scatter(x=edge_x, y=edge_y, line=dict(width=0.5, color='#888'), hoverinfo='none', mode='lines')
+    node_x, node_y, text, sizes = [], [], [], []
+    for node in graph.nodes():
+        x, y = pos[node]
+        node_x.append(x)
+        node_y.append(y)
+        text.append(f"{node} ({graph.nodes[node]['size']})")
+        sizes.append(8 + graph.nodes[node]['size'] * 2)
+    node_trace = go.Scatter(
+        x=node_x,
+        y=node_y,
+        mode='markers+text',
+        text=[node for node in graph.nodes()],
+        textposition='top center',
+        hovertext=text,
+        hoverinfo='text',
+        marker=dict(
+            showscale=True,
+            colorscale='Magma',
+            reversescale=False,
+            color=sizes,
+            size=sizes,
+            colorbar=dict(title='Mentions')
+        )
+    )
+    fig = go.Figure(data=[edge_trace, node_trace])
+    fig.update_layout(
+        showlegend=False,
+        hovermode='closest',
+        margin=dict(b=20, l=20, r=20, t=40),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)'
+    )
+    return fig
+
+
+def _sentiment_badge(sentiment: Optional[dict]) -> str:
+    label = (sentiment or {}).get('label', 'NEUTRAL').upper()
+    score = (sentiment or {}).get('score')
+    color = SENTIMENT_COLORS.get(label, '#95a5a6')
+    score_txt = f" | {score:.2f}" if isinstance(score, (int, float)) else ""
+    return f"<span style='background:{color};color:white;padding:2px 8px;border-radius:999px;font-size:0.75rem;'>{label}{score_txt}</span>"
+
+
+def render_ai_briefs(db_client):
+    articles = fetch_recent_articles(db_client, limit=12)
+    if not articles:
+        st.info("ℹ️ No analyzed articles found yet. Run the scraper to populate insights.")
+        return
+    max_cards = min(6, len(articles))
+    for start in range(0, max_cards, 3):
+        cols = st.columns(3)
+        for idx, col in enumerate(cols):
+            target_index = start + idx
+            if target_index >= max_cards:
+                continue
+            article = articles[target_index]
+            with col:
+                st.markdown(f"### [{article.get('title', 'Untitled')}]({article.get('url', '#')})")
+                st.markdown(_sentiment_badge(article.get('sentiment')), unsafe_allow_html=True)
+                summary = article.get('summary') or article.get('description') or "Summary unavailable."
+                st.write(summary)
+                meta = []
+                if article.get('focus_country'):
+                    meta.append(f"🌍 {article['focus_country']}")
+                if article.get('risk_level'):
+                    meta.append(f"⚠️ Risk: {article['risk_level']}")
+                if meta:
+                    st.caption(" | ".join(meta))
+                key_points = article.get('key_points')
+                if isinstance(key_points, str):
+                    key_points = [key_points]
+                if isinstance(key_points, list) and key_points:
+                    st.markdown("**Key Points**")
+                    for point in key_points[:3]:
+                        st.markdown(f"- {point}")
+
+
 def show_main_dashboard(db_client):
     st.markdown("<h1 style='text-align: center;'>🛡️ SENTINEL INTELLIGENCE DASHBOARD</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #888; font-size: 1.2em;'>Real-time Geopolitical Trend Analysis</p>", unsafe_allow_html=True)
@@ -161,14 +375,44 @@ def show_main_dashboard(db_client):
             st.markdown("<br>", unsafe_allow_html=True)
     else:
         st.info("ℹ️ No data yet. Run the scraper to see trending topics!")
+
+    st.markdown("---")
+    st.subheader("🧠 AI Intelligence Briefs")
+    render_ai_briefs(db_client)
     
     st.markdown("---")
-    st.subheader("🎯 Coming Soon")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.info("🗺️ **Geographic Heat Map**\nVisualize global hotspots")
-    with col2:
-        st.info("🔗 **Network Graph**\nTopic connections & relationships")
+    st.subheader("🗺️ Geographic Heat Map")
+    geo_df = build_geo_heatmap_data(db_client)
+    if not geo_df.empty:
+        heatmap_fig = px.choropleth(
+            geo_df,
+            locations="iso_alpha",
+            color="count",
+            hover_name="country",
+            color_continuous_scale=["#1b4332", "#2d6a4f", "#95d5b2", "#d8f3dc"],
+            labels={"count": "Mentions"}
+        )
+        heatmap_fig.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            height=500,
+            margin=dict(l=0, r=0, t=0, b=0),
+            geo=dict(showframe=False, projection_type='natural earth')
+        )
+        st.plotly_chart(heatmap_fig, use_container_width=True)
+        st.caption("Counts are derived from the latest articles mentioning a country in the title or matched keywords.")
+    else:
+        st.info("ℹ️ Not enough geographic signals yet. Add more keywords or run the scraper again.")
+
+    st.markdown("---")
+    st.subheader("🔗 Topic Network Graph")
+    nodes, edges = build_topic_network_data(db_client)
+    network_fig = render_topic_network(nodes, edges)
+    if network_fig:
+        st.plotly_chart(network_fig, use_container_width=True)
+        st.caption("Nodes scale with keyword mentions; links show how often keywords co-occur in the same article.")
+    else:
+        st.info("ℹ️ Need more overlapping keywords before we can build a network graph.")
 
 
 def show_settings_page(db_client):

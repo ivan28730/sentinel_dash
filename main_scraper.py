@@ -8,6 +8,8 @@ import json
 from firebase_admin import credentials, firestore, initialize_app
 import firebase_admin 
 from collections import defaultdict
+import feedparser
+import textwrap
 
 # --- 1. FIREBASE INITIALIZATION & CONFIGURATION ---
 
@@ -52,21 +54,137 @@ def get_scraper_config() -> dict[str, list[str]]:
     except Exception as e:
         print(f"⚠️ Could not load config from Firestore: {e}")
         
-    # Fallback to default configuration
+    # Fallback to default configuration with 100+ RSS feeds
     default_config = {
-        "keywords": ["geopolitics", "trade war", "AI regulation"], 
+        "keywords": ["geopolitics", "trade war", "AI regulation", "international relations", "diplomacy"], 
         "rss_feeds": [
-            "https://www.cnbc.com/id/100003114/device/rss/rss.html", 
-            "http://rss.cnn.com/rss/cnn_topstories.rss"
+            # === INTERNATIONAL NEWS (Major Networks) ===
+            "http://rss.cnn.com/rss/cnn_topstories.rss",
+            "http://rss.cnn.com/rss/cnn_world.rss",
+            "http://rss.cnn.com/rss/cnn_us.rss",
+            "http://feeds.bbci.co.uk/news/world/rss.xml",
+            "http://feeds.bbci.co.uk/news/world/africa/rss.xml",
+            "http://feeds.bbci.co.uk/news/world/asia/rss.xml",
+            "http://feeds.bbci.co.uk/news/world/europe/rss.xml",
+            "http://feeds.bbci.co.uk/news/world/middle_east/rss.xml",
+            "http://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
+            "https://www.theguardian.com/world/rss",
+            "https://www.theguardian.com/uk/rss",
+            "https://www.theguardian.com/us-news/rss",
+            "https://www.aljazeera.com/xml/rss/all.xml",
+            "https://www.dw.com/en/top-stories/s-9097/rss",
+            
+            # === US NEWS ===
+            "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+            "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",
+            "https://feeds.washingtonpost.com/rss/world",
+            "https://feeds.washingtonpost.com/rss/politics",
+            "https://abcnews.go.com/abcnews/topstories",
+            "https://abcnews.go.com/abcnews/internationalheadlines",
+            "http://feeds.foxnews.com/foxnews/world",
+            "http://feeds.foxnews.com/foxnews/politics",
+            "https://www.cbsnews.com/latest/rss/world",
+            "https://www.nbcnews.com/id/3032091/device/rss/rss.xml",
+            
+            # === BUSINESS & FINANCE ===
+            "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+            "https://www.cnbc.com/id/10001147/device/rss/rss.html",  # CNBC World News
+            "https://feeds.bloomberg.com/markets/news.rss",
+            "https://www.ft.com/world?format=rss",
+            "https://www.wsj.com/xml/rss/3_7085.xml",
+            "https://www.reuters.com/rssFeed/worldNews",
+            "https://www.marketwatch.com/rss/topstories",
+            
+            # === TECH NEWS ===
+            "https://techcrunch.com/feed/",
+            "https://www.theverge.com/rss/index.xml",
+            "https://www.wired.com/feed/rss",
+            "https://arstechnica.com/feed/",
+            "https://www.zdnet.com/news/rss.xml",
+            "https://www.cnet.com/rss/news/",
+            "https://www.engadget.com/rss.xml",
+            
+            # === GEOPOLITICS & POLICY ===
+            "https://foreignpolicy.com/feed/",
+            "https://www.cfr.org/content/newsletters/rss.xml",
+            "https://carnegieendowment.org/rss",
+            "https://www.brookings.edu/feed/",
+            "https://www.rand.org/blog.rss",
+            "https://www.chathamhouse.org/rss.xml",
+            "https://www.fpri.org/feed/",
+            
+            # === EUROPEAN NEWS ===
+            "https://www.euronews.com/rss",
+            "https://www.france24.com/en/rss",
+            "https://www.dw.com/en/rss",
+            "https://www.thelocal.com/feed",
+            "https://www.politico.eu/feed/",
+            
+            # === ASIAN NEWS ===
+            "https://www.scmp.com/rss/91/feed",  # South China Morning Post
+            "https://www.straitstimes.com/news/world/rss.xml",
+            "https://www.japantimes.co.jp/feed/",
+            "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
+            "https://www.thehindu.com/news/international/?service=rss",
+            
+            # === MIDDLE EAST NEWS ===
+            "https://english.alarabiya.net/rss.xml",
+            "https://www.haaretz.com/cmlink/1.628752",
+            "https://www.jpost.com/Rss/RssFeedsHeadlines.aspx",
+            "https://www.timesofisrael.com/feed/",
+            
+            # === LATIN AMERICA ===
+            "https://www.batimes.com.ar/feed",
+            "https://www.bnamericas.com/en/rss/all",
+            
+            # === AFRICA ===
+            "https://www.africanews.com/feed/",
+            "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf",
+            
+            # === SCIENCE & ENVIRONMENT ===
+            "https://www.sciencedaily.com/rss/all.xml",
+            "https://www.nature.com/nature.rss",
+            "https://www.newscientist.com/feed/home",
+            "https://www.nationalgeographic.com/feeds/destinations/",
+            
+            # === DEFENSE & SECURITY ===
+            "https://www.defensenews.com/arc/outboundfeeds/rss/",
+            "https://www.janes.com/feeds/news",
+            "https://breakingdefense.com/feed/",
+            
+            # === HUMANITARIAN & DEVELOPMENT ===
+            "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
+            "https://www.devex.com/rss",
+            "https://www.oxfam.org/en/rss.xml",
+            
+            # === ADDITIONAL QUALITY SOURCES ===
+            "https://www.economist.com/the-world-this-week/rss.xml",
+            "https://www.theatlantic.com/feed/all/",
+            "https://www.newyorker.com/feed/news",
+            "https://www.vox.com/rss/index.xml",
+            "https://www.axios.com/feeds/feed.rss",
+            "https://www.politico.com/rss/politics08.xml",
+            "https://thehill.com/feed",
+            "https://www.salon.com/feed/",
+            "https://slate.com/feeds/all.rss",
+            "https://www.thedailybeast.com/rss",
+            "https://qz.com/feed/",
+            "https://www.huffpost.com/section/world-news/feed",
         ],
         "subreddits": ["worldnews", "geopolitics"]
     }
-    print(f"ℹ️ Using default configuration")
+    print(f"ℹ️ Using default configuration with {len(default_config['rss_feeds'])} RSS feeds")
     return default_config
 
 # API Keys
 GNEWS_API_KEY = os.getenv("GNEWS_API_KEY", "")
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
+HF_API_KEY = os.getenv("HF_API_KEY", "")
+HF_MODEL_ID = os.getenv("HF_MODEL_ID", "mistralai/Mixtral-8x7B-Instruct")
+HF_API_URL = os.getenv("HF_API_URL", f"https://api-inference.huggingface.co/models/{HF_MODEL_ID}")
+HF_TIMEOUT = float(os.getenv("HF_API_TIMEOUT", "60"))
+LLM_ANALYSIS_LIMIT = int(os.getenv("LLM_ANALYSIS_LIMIT", "80"))
+LLM_CALLS_MADE = 0
 
 def get_existing_hashes() -> set[str]:
     """Retrieves all existing url_hash values from the articles collection for deduplication."""
@@ -151,19 +269,126 @@ def fetch_content(url: str) -> Optional[str]:
 
 # --- 3. AI ANALYSIS FUNCTION (Placeholder for API Offload) ---
 
+
+def _build_llm_prompt(title: str, content: str, matched_keywords: list[str]) -> str:
+    snippet = textwrap.shorten(content, width=4800, placeholder="")
+    tracked = ", ".join(matched_keywords) if matched_keywords else "None"
+    prompt = f"""
+You are Sentinel Analyst, an AI that writes concise geopolitical intelligence briefs.
+Summarize the article below and output ONLY valid JSON with keys:
+summary (<=3 sentences),
+sentiment (object with label in [POSITIVE, NEGATIVE, NEUTRAL] and score 0-1),
+entities (list of objects {{name, type}}),
+focus_country (string or null),
+risk_level (Low/Moderate/Elevated/Critical),
+key_points (list of short bullet strings),
+keywords (list of tracked keywords referenced).
+
+Title: {title}
+Tracked Keywords Mentioned: {tracked}
+Article Body:
+---
+{snippet}
+---
+
+Return valid JSON only.
+"""
+    return textwrap.dedent(prompt).strip()
+
+
+def _extract_json_block(text: str) -> Optional[dict[str, Any]]:
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        return json.loads(text[start:end + 1])
+    except json.JSONDecodeError:
+        return None
+
+
+def run_llm_analysis(title: str, content: str, matched_keywords: list[str]) -> Optional[dict[str, Any]]:
+    global LLM_CALLS_MADE
+    if not HF_API_KEY:
+        return None
+    if LLM_ANALYSIS_LIMIT > 0 and LLM_CALLS_MADE >= LLM_ANALYSIS_LIMIT:
+        return None
+    prompt = _build_llm_prompt(title, content, matched_keywords)
+    headers = {
+        "Authorization": f"Bearer {HF_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "inputs": prompt,
+        "parameters": {"max_new_tokens": 512, "temperature": 0.2},
+        "options": {"wait_for_model": True}
+    }
+    try:
+        response = httpx.post(HF_API_URL, headers=headers, json=payload, timeout=HF_TIMEOUT)
+        LLM_CALLS_MADE += 1
+        if response.status_code != 200:
+            print(f"⚠️ LLM request failed ({response.status_code}): {response.text[:120]}")
+            return None
+        data = response.json()
+        generated_text = ""
+        if isinstance(data, list) and data:
+            generated_text = data[0].get("generated_text", "")
+        elif isinstance(data, dict) and data.get("generated_text"):
+            generated_text = data.get("generated_text", "")
+        if generated_text:
+            parsed = _extract_json_block(generated_text)
+            if parsed:
+                return parsed
+        if isinstance(data, dict):
+            if data.get("error"):
+                print(f"⚠️ LLM error: {data['error']}")
+                return None
+            return data
+    except Exception as e:
+        print(f"⚠️ LLM analysis error: {e}")
+    return None
+
 def analyze_text(title: str, content: str, keywords: list[str]) -> dict[str, Any]:
     """
     Placeholder for AI analysis. The final implementation will use ASYNC httpx 
     to call the Hugging Face Inference API.
     """
-    # Simple keyword matching for now
     matched_keywords = [kw for kw in keywords if kw.lower() in content.lower() or kw.lower() in title.lower()]
-    
-    return {
+    base_result = {
         "sentiment": {"label": "NEUTRAL", "score": 0.5},
         "entities": [],
         "keywords_matched": matched_keywords,
+        "summary": textwrap.shorten(content, width=320, placeholder="..."),
+        "focus_country": None,
+        "risk_level": "Low",
+        "key_points": [],
+        "analysis_model": "heuristic"
     }
+
+    llm_payload = run_llm_analysis(title, content, matched_keywords)
+    if llm_payload:
+        sentiment = llm_payload.get("sentiment", base_result["sentiment"])
+        if isinstance(sentiment, dict) and sentiment.get("label"):
+            sentiment["label"] = sentiment["label"].upper()
+        entities = llm_payload.get("entities", base_result["entities"])
+        if isinstance(entities, dict):
+            entities = [entities]
+        key_points = llm_payload.get("key_points", base_result["key_points"])
+        if isinstance(key_points, str):
+            key_points = [key_points]
+        base_result.update({
+            "summary": llm_payload.get("summary") or base_result["summary"],
+            "sentiment": sentiment,
+            "entities": entities,
+            "focus_country": llm_payload.get("focus_country") or llm_payload.get("primary_country"),
+            "risk_level": llm_payload.get("risk_level", base_result["risk_level"]),
+            "key_points": key_points,
+            "analysis_model": llm_payload.get("model", HF_MODEL_ID),
+        })
+        if llm_payload.get("keywords"):
+            merged = set(base_result["keywords_matched"]) | {kw.strip() for kw in llm_payload["keywords"] if kw}
+            base_result["keywords_matched"] = sorted(merged)
+    return base_result
 
 # --- 4. ASYNCHRONOUS DATA FETCHING (SCALING SOLUTION) ---
 
@@ -263,11 +488,64 @@ async def fetch_newsapi_articles(keywords: list[str]) -> list[dict]:
                 
     return all_articles
 
+
 async def fetch_rss_articles(rss_feeds: list[str]) -> list[dict]:
-    """Placeholder for asynchronous RSS fetching."""
-    # TODO: Implement RSS parsing with feedparser
-    print("ℹ️ RSS fetching not yet implemented")
-    return []
+    """Asynchronously fetches articles from RSS feeds."""
+    all_articles = []
+    
+    print(f"📡 Starting RSS fetch from {len(rss_feeds)} feeds...")
+    
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        # Process feeds in batches to avoid overwhelming the system
+        batch_size = 20
+        for i in range(0, len(rss_feeds), batch_size):
+            batch = rss_feeds[i:i + batch_size]
+            tasks = [client.get(feed_url) for feed_url in batch]
+            
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for j, response in enumerate(responses):
+                feed_url = batch[j]
+                
+                if isinstance(response, Exception):
+                    print(f"❌ RSS error for '{feed_url}': {response}")
+                    continue
+                    
+                if response.status_code == 200:
+                    try:
+                        # Parse the RSS feed
+                        feed = feedparser.parse(response.text)
+                        
+                        # Extract articles from feed entries
+                        for entry in feed.entries:
+                            # Get the link (URL)
+                            url = entry.get('link', '')
+                            if not url:
+                                continue
+                            
+                            article = {
+                                'url': url,
+                                'title': entry.get('title', 'No Title'),
+                                'description': entry.get('summary', entry.get('description', '')),
+                                'publishedAt': entry.get('published', entry.get('updated', '')),
+                                'source_type': 'RSS',
+                                'url_hash': generate_hash(url)
+                            }
+                            all_articles.append(article)
+                        
+                        print(f"✅ RSS [{i+j+1}/{len(rss_feeds)}]: Fetched {len(feed.entries)} articles from {feed_url[:50]}...")
+                        
+                    except Exception as e:
+                        print(f"❌ Failed to parse RSS feed {feed_url}: {e}")
+                else:
+                    print(f"❌ RSS feed returned status {response.status_code} for {feed_url}")
+            
+            # Small delay between batches to be respectful
+            if i + batch_size < len(rss_feeds):
+                await asyncio.sleep(1)
+    
+    print(f"✅ RSS: Total fetched {len(all_articles)} articles from {len(rss_feeds)} feeds")
+    return all_articles
 
 # --- 5. SERVER-SIDE AGGREGATION (SCALING SOLUTION: FRONTEND DECOUPLING) ---
 
@@ -278,9 +556,15 @@ def aggregate_metrics(articles_list: list[dict]):
     """
     metrics = defaultdict(int)
     keyword_counts = defaultdict(int)
+    source_counts = defaultdict(int)
 
-    # Example aggregation logic: Count keywords matched
+    # Example aggregation logic: Count keywords matched and sources
     for article in articles_list:
+        # Count by source type
+        source_type = article.get('source_type', 'UNKNOWN')
+        source_counts[source_type] += 1
+        
+        # Count keywords matched
         if 'keywords_matched' in article.get('analysis_results', {}):
             for keyword in article['analysis_results']['keywords_matched']:
                 keyword_counts[keyword] += 1
@@ -288,11 +572,14 @@ def aggregate_metrics(articles_list: list[dict]):
     # Store aggregated data
     metrics['total_new_articles'] = len(articles_list)
     metrics['keyword_counts'] = dict(keyword_counts)
+    metrics['source_counts'] = dict(source_counts)
     
     # Save to the dashboard_metrics collection
     db = firestore.client()
     db.collection('dashboard_metrics').document('latest_metrics').set(metrics, merge=True)
-    print(f"✅ Metrics aggregated and saved: {len(articles_list)} new articles, {len(keyword_counts)} unique keywords")
+    print(f"✅ Metrics aggregated and saved: {len(articles_list)} new articles")
+    print(f"   📊 By source: {dict(source_counts)}")
+    print(f"   🔑 Unique keywords: {len(keyword_counts)}")
 
 
 # --- 6. MAIN PIPELINE ORCHESTRATION ---
@@ -329,6 +616,9 @@ async def main_pipeline():
     gnews_data, newsapi_data, rss_data = await asyncio.gather(*fetch_tasks)
     all_raw_articles = gnews_data + newsapi_data + rss_data
     print(f"\n📊 Total raw articles fetched: {len(all_raw_articles)}")
+    print(f"   - GNews: {len(gnews_data)}")
+    print(f"   - NewsAPI: {len(newsapi_data)}")
+    print(f"   - RSS: {len(rss_data)}")
 
     # 4. Deduplication and Filter
     new_articles = [article for article in all_raw_articles if article['url_hash'] not in existing_hashes]
@@ -345,8 +635,10 @@ async def main_pipeline():
             if not article.get('url') or not article.get('title'):
                 continue
             
-            print(f"  Processing [{i}/{len(new_articles)}]: {article.get('title', 'Untitled')[:60]}...")
-                
+            # Show progress every 100 articles
+            if i % 100 == 0:
+                print(f"  Progress: [{i}/{len(new_articles)}] articles processed...")
+            
             clean_content = fetch_content(article['url'])
             
             if clean_content:
